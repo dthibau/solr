@@ -1,97 +1,179 @@
-# a docker-compose.yml to start a simple cluster with three ZooKeeper nodes and three Solr nodes.
-#
-# To use:
-#
-# mkdir mycluster
-# cd mycluster
-# curl --output docker-compose.yml https://raw.githubusercontent.com/docker-solr/docker-solr-examples/master/docker-compose/docker-compose.yml
-# docker-compose up
-#
-version: '3.3'
+version: "3.8"
+
 services:
-  solr1:
-    image: solr:8.3
-    container_name: solr1
-    ports:
-     - "8981:8983"
-    environment:
-      - ZK_HOST=zoo1:2181,zoo2:2181,zoo3:2181
-    networks:
-      - solr
-    depends_on:
-      - zoo1
-      - zoo2
-      - zoo3
-
-  solr2:
-    image: solr:8.3
-    container_name: solr2
-    ports:
-     - "8982:8983"
-    environment:
-      - ZK_HOST=zoo1:2181,zoo2:2181,zoo3:2181
-    networks:
-      - solr
-    depends_on:
-      - zoo1
-      - zoo2
-      - zoo3
-
-  solr3:
-    image: solr:8.3
-    container_name: solr3
-    ports:
-     - "8984:8983"
-    environment:
-      - ZK_HOST=zoo1:2181,zoo2:2181,zoo3:2181
-    networks:
-      - solr
-    depends_on:
-      - zoo1
-      - zoo2
-      - zoo3
-
+  # -------------------------
+  # ZOOKEEPER ENSEMBLE (3x)
+  # -------------------------
   zoo1:
-    image: zookeeper:3.5
+    image: zookeeper:3.9
     container_name: zoo1
     restart: always
     hostname: zoo1
     ports:
-      - 2181:2181
+      - "2181:2181"
     environment:
       ZOO_MY_ID: 1
       ZOO_SERVERS: server.1=0.0.0.0:2888:3888;2181 server.2=zoo2:2888:3888;2181 server.3=zoo3:2888:3888;2181
-      ZOO_4LW_COMMANDS_WHITELIST: mntr,conf,ruok
+      ZOO_4LW_COMMANDS_WHITELIST: ruok,mntr,conf,stat,srvr
+    volumes:
+      - zoo1_data:/data
+      - zoo1_datalog:/datalog
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo ruok | nc -w 2 127.0.0.1 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - solr
 
   zoo2:
-    image: zookeeper:3.5
+    image: zookeeper:3.9
     container_name: zoo2
     restart: always
     hostname: zoo2
     ports:
-      - 2182:2181
+      - "2182:2181"
     environment:
       ZOO_MY_ID: 2
       ZOO_SERVERS: server.1=zoo1:2888:3888;2181 server.2=0.0.0.0:2888:3888;2181 server.3=zoo3:2888:3888;2181
-      ZOO_4LW_COMMANDS_WHITELIST: mntr,conf,ruok
+      ZOO_4LW_COMMANDS_WHITELIST: ruok,mntr,conf,stat,srvr
+    volumes:
+      - zoo2_data:/data
+      - zoo2_datalog:/datalog
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo ruok | nc -w 2 127.0.0.1 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - solr
 
   zoo3:
-    image: zookeeper:3.5
+    image: zookeeper:3.9
     container_name: zoo3
     restart: always
     hostname: zoo3
     ports:
-      - 2183:2181
+      - "2183:2181"
     environment:
       ZOO_MY_ID: 3
       ZOO_SERVERS: server.1=zoo1:2888:3888;2181 server.2=zoo2:2888:3888;2181 server.3=0.0.0.0:2888:3888;2181
-      ZOO_4LW_COMMANDS_WHITELIST: mntr,conf,ruok
+      ZOO_4LW_COMMANDS_WHITELIST: ruok,mntr,conf,stat,srvr
+    volumes:
+      - zoo3_data:/data
+      - zoo3_datalog:/datalog
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo ruok | nc -w 2 127.0.0.1 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - solr
+
+  # -------------------------
+  # SOLR NODES (3x)
+  # -------------------------
+  solr1:
+    image: solr:9.6
+    container_name: solr1
+    ports:
+      - "8981:8983"
+    environment:
+      ZK_HOST: zoo1:2181,zoo2:2181,zoo3:2181
+      SOLR_JAVA_MEM: "-Xms1g -Xmx1g"
+      # Active le Package Manager (utile si vous voulez installer des plugins, ex. DIH externe)
+      SOLR_OPTS: "-Denable.packages=true"
+    command:
+      - bash
+      - -c
+      - "solr -f -c -z $$ZK_HOST"
+    depends_on:
+      zoo1:
+        condition: service_healthy
+      zoo2:
+        condition: service_healthy
+      zoo3:
+        condition: service_healthy
+    volumes:
+      - solr1_data:/var/solr
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -fsS http://localhost:8983/solr/admin/info/system?wt=json >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - solr
+
+  solr2:
+    image: solr:9.6
+    container_name: solr2
+    ports:
+      - "8982:8983"
+    environment:
+      ZK_HOST: zoo1:2181,zoo2:2181,zoo3:2181
+      SOLR_JAVA_MEM: "-Xms1g -Xmx1g"
+      SOLR_OPTS: "-Denable.packages=true"
+    command:
+      - bash
+      - -c
+      - "solr -f -c -z $$ZK_HOST"
+    depends_on:
+      zoo1:
+        condition: service_healthy
+      zoo2:
+        condition: service_healthy
+      zoo3:
+        condition: service_healthy
+    volumes:
+      - solr2_data:/var/solr
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -fsS http://localhost:8983/solr/admin/info/system?wt=json >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - solr
+
+  solr3:
+    image: solr:9.6
+    container_name: solr3
+    ports:
+      - "8984:8983"
+    environment:
+      ZK_HOST: zoo1:2181,zoo2:2181,zoo3:2181
+      SOLR_JAVA_MEM: "-Xms1g -Xmx1g"
+      SOLR_OPTS: "-Denable.packages=true"
+    command:
+      - bash
+      - -c
+      - "solr -f -c -z $$ZK_HOST"
+    depends_on:
+      zoo1:
+        condition: service_healthy
+      zoo2:
+        condition: service_healthy
+      zoo3:
+        condition: service_healthy
+    volumes:
+      - solr3_data:/var/solr
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -fsS http://localhost:8983/solr/admin/info/system?wt=json >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
     networks:
       - solr
 
 networks:
   solr:
+
+volumes:
+  zoo1_data:
+  zoo1_datalog:
+  zoo2_data:
+  zoo2_datalog:
+  zoo3_data:
+  zoo3_datalog:
+  solr1_data:
+  solr2_data:
+  solr3_data:
